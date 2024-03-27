@@ -1,0 +1,86 @@
+import fitz  # PyMuPDF
+import re
+import pandas as pd
+
+# Define your paths here
+pdf_path = '/Users/dzmitrygerasimovic/Downloads/Direktori Importir Indonesia 2020 Jilid II.pdf'
+output_path = 'итог_2.xlsx'
+
+# Open the PDF
+pdf_document = fitz.open(pdf_path)
+
+# Regex patterns
+company_pattern = re.compile(r'^(PT|CV)\. [\w\s.,()-]+')
+hs_code_pattern = re.compile(r'^\d{8} -')
+phone_pattern = re.compile(r'\(\d{2,3}\)\s\d+')
+email_pattern = re.compile(r'\S+@\S+\.\S+')
+website_pattern = re.compile(r'www\.\S+|http\S+')
+watermark_pattern = re.compile(r'https://www\.bps\.go\.id')
+
+# Initialize variables
+companies = []
+current_company = {}
+current_hs_code = ''  # Initialize HS Code with an empty string
+
+# Iterate over each page
+for page_num in range(len(pdf_document)):
+    page = pdf_document.load_page(page_num)
+    text = page.get_text("text")
+
+    # Clean the watermark from the text
+    text = watermark_pattern.sub('', text)
+
+    # Split the text into lines and process each line
+    lines = text.split('\n')
+    for line in lines:
+        # Skip empty lines
+        if not line.strip():
+            continue
+
+        # Detect HS code
+        if hs_code_pattern.match(line):
+            if current_company:  # Save the previous company before continuing to the next code
+                companies.append(current_company)
+                current_company = {}
+            current_hs_code = line.strip()
+            continue
+
+        # Detect company names and initialize their details
+        if company_pattern.match(line):
+            if current_company:  # Save the previous company before starting a new one
+                companies.append(current_company)
+            current_company = {
+                'Company Name': line.strip(),
+                'HS Code': current_hs_code,
+                'Address': '',
+                'Website': '',
+                'Phone': '',
+                'Email': ''
+            }
+            continue
+
+        # If current line doesn't match any of the above patterns and we have a current company
+        if current_company:
+            if website_pattern.search(line):
+                current_company['Website'] = website_pattern.search(line).group()
+            elif phone_pattern.search(line):
+                current_company['Phone'] = phone_pattern.search(line).group()
+            elif email_pattern.search(line):
+                current_company['Email'] = email_pattern.search(line).group()
+            else:
+                # If no other details are found, it's considered part of the address
+                current_company['Address'] += (' ' + line.strip()) if current_company['Address'] else line.strip()
+
+# Add the last company if exists
+if current_company:
+    companies.append(current_company)
+
+# Close the PDF document
+pdf_document.close()
+
+# Create a DataFrame
+df = pd.DataFrame(companies)
+
+# Save to Excel
+df.to_excel(output_path, index=False)
+print(f"Data extraction complete. The information has been saved to '{output_path}'.")
